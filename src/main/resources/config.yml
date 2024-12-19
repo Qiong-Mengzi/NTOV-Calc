@@ -1,0 +1,6 @@
+# Configuration
+
+# Language
+lang:
+  usage: '[Usage] /calc <expression>'
+
