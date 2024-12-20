@@ -10,3 +10,4 @@ commands:
   calc:
     description: 'Compute expression.'
     permission: no op
+    usage: '/calc <expression>'
