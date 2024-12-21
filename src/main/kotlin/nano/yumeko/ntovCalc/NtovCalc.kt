@@ -3,18 +3,22 @@ package nano.yumeko.ntovCalc
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.command.Command
 import org.bukkit.command.CommandSender
-
-import nano.yumeko.ntovCalc.Calculator
-import kotlin.math.exp
+import org.bukkit.configuration.file.FileConfiguration
 
 class NtovCalc : JavaPlugin() {
 
-    val Calc = Calculator()
+    private val calc = Calculator(10)
 
     override fun onEnable() {
         // Plugin startup logic
-        saveResource("config.yml", false)
-
+        saveDefaultConfig()
+        try {
+            calc.setTokenLimit(config.getInt("MaxTokenLimit"))
+        } catch (e: Exception) {
+            logger.warning("Initialization of Calculator failed.")
+            throw e
+        }
+        logger.info("Initialization succeeded.")
     }
 
     override fun onDisable() {
@@ -25,14 +29,16 @@ class NtovCalc : JavaPlugin() {
         if (label == "calc") {
             if (args.isNotEmpty()) {
                 val expr = args.joinToString(" ") + " -"
-                val scanResult = Calc.scan(expr)
-                if (scanResult.getError() < 0) {
-                    val analyzeResult = Calc.analyze(scanResult)
-                    if (analyzeResult.errorReason.op.isEmpty()) {
-                        sender.sendMessage(Calc.calc(analyzeResult.result).toString())
+                val scanResult = calc.scan(expr)
+                if (scanResult.getError() < 0 && scanResult.getError() != -1145) {
+                    val analyzeResult = calc.analyze(scanResult)
+                    if (analyzeResult.flag == Calculator.AnalyzeFlag.SUCCEED) {
+                        sender.sendMessage(calc.calc(analyzeResult.result).toString())
                     } else {
-                        sender.sendMessage("Syntax Error: " + analyzeResult.errorReason.op)
+                        sender.sendMessage("Syntax Error: " + analyzeResult.errorReason.op + " ( " + analyzeResult.flag.toString() + " )")
                     }
+                } else if (scanResult.getError() == -1145) {
+                    sender.sendMessage("Expression too long...")
                 } else {
                     sender.sendMessage("Unknown Character " + expr[scanResult.getError()] + " at index " + scanResult.getError())
                 }

@@ -1,10 +1,25 @@
 package nano.yumeko.ntovCalc
 
 import java.util.Stack
+import kotlin.math.*
 
-class Calculator {
+class Calculator(maxToken: Int = 256) {
     @JvmField
     val scanSignList = "()+-*/%^"
+
+    @JvmField
+    val supportFunc = setOf(
+        "sqrt",
+        "ln",
+        "sin",
+        "cos",
+        "tan",
+        "asin",
+        "acos",
+        "atan"
+    )
+
+    private var maxTokenLimit = maxToken
 
     enum class TokenType {
         UNK,
@@ -74,9 +89,18 @@ class Calculator {
         }
     }
 
-    class AnalyzeResult(_result: Array<Token>, reason: Token) {
-        val result = _result
+    enum class AnalyzeFlag {
+        SUCCEED,
+        UNK_FUNC,
+        UNMATCHED_PARENTHESES,
+        EMPTY_SUB_EXPR,
+
+    }
+
+    class AnalyzeResult(analyzeResult: Array<Token>, reason: Token, analyzeFlag: AnalyzeFlag = AnalyzeFlag.SUCCEED) {
+        val result = analyzeResult
         val errorReason = reason
+        val flag = analyzeFlag
     }
 
     /**
@@ -129,6 +153,14 @@ class Calculator {
         scanErrorChar = (0).toChar()
     }
 
+    fun getTokenLimit(): Int {
+        return maxTokenLimit
+    }
+
+    fun setTokenLimit(newTokenLimit: Int = 256) {
+        maxTokenLimit = newTokenLimit
+    }
+
     /**
      * 对表达式进行词法分析
      *
@@ -146,186 +178,189 @@ class Calculator {
 
         var i = 0
         for (c in s) {
-            when (status) {
-                ScanStatus.ERROR -> break
+            if (tokenBuf.size < maxTokenLimit)
+                when (status) {
+                    ScanStatus.ERROR -> break
 
-                ScanStatus.START -> {
-                    numBuf = 0f
-                    strBuf.clear()
-                    if (c.isDigit()) {
-                        status = ScanStatus.POS_INT
-                        numBuf = (c - '0').toFloat()
-                    } else if (c.isLetter()) {
-                        status = ScanStatus.ID
-                        strBuf.append(c)
-                    } else if (c == '+') {
-                        status = ScanStatus.POS_INT
-                    } else if (c == '-') {
-                        status = ScanStatus.NEG_INT
-                    } else if (c == '(' || c == ')') {
-                        status = ScanStatus.SIGN
-                        strBuf.append(c)
-                    } else if (c == ' ' || c == '\t') {
-                        status = ScanStatus.START
-                    } else {
-                        status = ScanStatus.ERROR
+                    ScanStatus.START -> {
+                        numBuf = 0f
+                        strBuf.clear()
+                        if (c.isDigit()) {
+                            status = ScanStatus.POS_INT
+                            numBuf = (c - '0').toFloat()
+                        } else if (c.isLetter()) {
+                            status = ScanStatus.ID
+                            strBuf.append(c)
+                        } else if (c == '+') {
+                            status = ScanStatus.POS_INT
+                        } else if (c == '-') {
+                            status = ScanStatus.NEG_INT
+                        } else if (c == '(' || c == ')') {
+                            status = ScanStatus.SIGN
+                            strBuf.append(c)
+                        } else if (c == ' ' || c == '\t') {
+                            status = ScanStatus.START
+                        } else {
+                            status = ScanStatus.ERROR
+                        }
+                    }
+
+                    ScanStatus.NEXT -> {
+                        numBuf = 0f
+                        if (c.isDigit()) {
+                            status = ScanStatus.POS_INT
+                            numBuf = (c - '0').toFloat()
+                        } else if (c.isLetter()) {
+                            status = ScanStatus.ID
+                            strBuf.clear()
+                            strBuf.append(c)
+                        } else if (c in scanSignList) {
+                            status = ScanStatus.SIGN
+                            strBuf.append(c)
+                        } else if (c == ' ' || c == '\t') {
+                            status = ScanStatus.START
+                        } else {
+                            status = ScanStatus.ERROR
+                        }
+                    }
+
+                    ScanStatus.SIGN -> {
+                        tokenBuf += opToken(strBuf.toString())
+                        strBuf.clear()
+
+                        if (c.isDigit()) {
+                            status = ScanStatus.POS_INT
+                            numBuf = (c - '0').toFloat()
+                        } else if (c.isLetter()) {
+                            status = ScanStatus.ID
+                            strBuf.append(c)
+                        } else if (c in scanSignList) {
+                            status = ScanStatus.SIGN
+                            strBuf.append(c)
+                        } else if (c == ' ' || c == '\t') {
+                            status = ScanStatus.NEXT
+                        } else {
+                            status = ScanStatus.ERROR
+                        }
+                    }
+
+                    ScanStatus.ID -> {
+                        if (c.isDigit()) {
+                            status = ScanStatus.POS_INT
+                            tokenBuf.add(funcToken(strBuf.toString()))
+                            strBuf.clear()
+                        } else if (c.isLetter()) {
+                            status = ScanStatus.ID
+                            strBuf.append(c)
+                        } else if (c == ' ' || c == '\t') {
+                            status = ScanStatus.NEXT
+                            tokenBuf.add(funcToken(strBuf.toString()))
+                            strBuf.clear()
+                        } else if (c in scanSignList) {
+                            status = ScanStatus.SIGN
+                            tokenBuf.add(funcToken(strBuf.toString()))
+                            strBuf.clear()
+                            strBuf.append(c)
+                        } else status = ScanStatus.ERROR
+                    }
+
+                    ScanStatus.POS_INT -> {
+                        if (c.isDigit()) {
+                            status = ScanStatus.POS_INT
+                            numBuf = numBuf * 10f + (c - '0').toFloat()
+                        } else if (c == '.') {
+                            status = ScanStatus.POS_POINT
+                        } else if (c.isLetter()) {
+                            status = ScanStatus.ID
+                            tokenBuf.add(numToken(numBuf))
+                            strBuf.append(c)
+                            numBuf = 0f
+                        } else if (c in scanSignList) {
+                            status = ScanStatus.SIGN
+                            tokenBuf.add(numToken(numBuf))
+                            strBuf.append(c)
+                            numBuf = 0f
+                        } else if (c == ' ' || c == '\t') {
+                            status = ScanStatus.NEXT
+                            tokenBuf.add(numToken(numBuf))
+                            numBuf = 0f
+                        } else status = ScanStatus.ERROR
+                    }
+
+                    ScanStatus.NEG_INT -> {
+                        if (c.isDigit()) {
+                            numBuf = numBuf * 10f - (c - '0').toFloat()
+                        } else if (c == '.') {
+                            status = ScanStatus.NEG_POINT
+                        } else if (c.isLetter()) {
+                            status = ScanStatus.ID
+                            tokenBuf.add(numToken(numBuf))
+                            strBuf.append(c)
+                            numBuf = 0f
+                        } else if (c in scanSignList) {
+                            status = ScanStatus.SIGN
+                            tokenBuf.add(numToken(numBuf))
+                            strBuf.append(c)
+                            numBuf = 0f
+                        } else if (c == ' ' || c == '\t') {
+                            status = ScanStatus.NEXT
+                            tokenBuf.add(numToken(numBuf))
+                            numBuf = 0f
+                        }
+                    }
+
+                    ScanStatus.POS_POINT -> {
+                        if (c.isDigit()) {
+                            status = ScanStatus.POS_POINT
+                            exp /= 10f
+                            numBuf += (c - '0').toFloat() * exp
+                        } else if (c.isLetter()) {
+                            status = ScanStatus.ID
+                            tokenBuf.add(numToken(numBuf))
+                            strBuf.append(c)
+                            numBuf = 0f
+                            exp = 1f
+                        } else if (c in scanSignList) {
+                            status = ScanStatus.SIGN
+                            tokenBuf.add(numToken(numBuf))
+                            strBuf.append(c)
+                            numBuf = 0f
+                            exp = 1f
+                        } else if (c == ' ' || c == '\t') {
+                            status = ScanStatus.NEXT
+                            tokenBuf.add(numToken(numBuf))
+                            numBuf = 0f
+                            exp = 1f
+                        } else status = ScanStatus.ERROR
+                    }
+
+                    ScanStatus.NEG_POINT -> {
+                        if (c.isDigit()) {
+                            status = ScanStatus.NEG_POINT
+                            exp /= 10f
+                            numBuf -= (c - '0').toFloat() * exp
+                        } else if (c.isLetter()) {
+                            status = ScanStatus.ID
+                            tokenBuf.add(numToken(numBuf))
+                            strBuf.append(c)
+                            numBuf = 0f
+                            exp = 1f
+                        } else if (c in scanSignList) {
+                            status = ScanStatus.SIGN
+                            tokenBuf.add(numToken(numBuf))
+                            strBuf.append(c)
+                            numBuf = 0f
+                            exp = 1f
+                        } else if (c == ' ' || c == '\t') {
+                            status = ScanStatus.NEXT
+                            tokenBuf.add(numToken(numBuf))
+                            numBuf = 0f
+                            exp = 1f
+                        } else status = ScanStatus.ERROR
                     }
                 }
-
-                ScanStatus.NEXT -> {
-                    numBuf = 0f
-                    if (c.isDigit()) {
-                        status = ScanStatus.POS_INT
-                        numBuf = (c - '0').toFloat()
-                    } else if (c.isLetter()) {
-                        status = ScanStatus.ID
-                        strBuf.clear()
-                        strBuf.append(c)
-                    } else if (c in scanSignList) {
-                        status = ScanStatus.SIGN
-                        strBuf.append(c)
-                    } else if (c == ' ' || c == '\t') {
-                        status = ScanStatus.START
-                    } else {
-                        status = ScanStatus.ERROR
-                    }
-                }
-
-                ScanStatus.SIGN -> {
-                    tokenBuf += opToken(strBuf.toString())
-                    strBuf.clear()
-
-                    if (c.isDigit()) {
-                        status = ScanStatus.POS_INT
-                        numBuf = (c - '0').toFloat()
-                    } else if (c.isLetter()) {
-                        status = ScanStatus.ID
-                        strBuf.append(c)
-                    } else if (c in scanSignList) {
-                        status = ScanStatus.SIGN
-                        strBuf.append(c)
-                    } else if (c == ' ' || c == '\t') {
-                        status = ScanStatus.NEXT
-                    } else {
-                        status = ScanStatus.ERROR
-                    }
-                }
-
-                ScanStatus.ID -> {
-                    if (c.isDigit()) {
-                        status = ScanStatus.POS_INT
-                        tokenBuf.add(funcToken(strBuf.toString()))
-                        strBuf.clear()
-                    } else if (c.isLetter()) {
-                        status = ScanStatus.ID
-                        strBuf.append(c)
-                    } else if (c == ' ' || c == '\t') {
-                        status = ScanStatus.NEXT
-                        tokenBuf.add(funcToken(strBuf.toString()))
-                        strBuf.clear()
-                    } else if (c in scanSignList) {
-                        status = ScanStatus.SIGN
-                        tokenBuf.add(funcToken(strBuf.toString()))
-                        strBuf.clear()
-                        strBuf.append(c)
-                    } else status = ScanStatus.ERROR
-                }
-
-                ScanStatus.POS_INT -> {
-                    if (c.isDigit()) {
-                        status = ScanStatus.POS_INT
-                        numBuf = numBuf * 10f + (c - '0').toFloat()
-                    } else if (c == '.') {
-                        status = ScanStatus.POS_POINT
-                    } else if (c.isLetter()) {
-                        status = ScanStatus.ID
-                        tokenBuf.add(numToken(numBuf))
-                        strBuf.append(c)
-                        numBuf = 0f
-                    } else if (c in scanSignList) {
-                        status = ScanStatus.SIGN
-                        tokenBuf.add(numToken(numBuf))
-                        strBuf.append(c)
-                        numBuf = 0f
-                    } else if (c == ' ' || c == '\t') {
-                        status = ScanStatus.NEXT
-                        tokenBuf.add(numToken(numBuf))
-                        numBuf = 0f
-                    } else status = ScanStatus.ERROR
-                }
-
-                ScanStatus.NEG_INT -> {
-                    if (c.isDigit()) {
-                        numBuf = numBuf * 10f - (c - '0').toFloat()
-                    } else if (c == '.') {
-                        status = ScanStatus.NEG_POINT
-                    } else if (c.isLetter()) {
-                        status = ScanStatus.ID
-                        tokenBuf.add(numToken(numBuf))
-                        strBuf.append(c)
-                        numBuf = 0f
-                    } else if (c in scanSignList) {
-                        status = ScanStatus.SIGN
-                        tokenBuf.add(numToken(numBuf))
-                        strBuf.append(c)
-                        numBuf = 0f
-                    } else if (c == ' ' || c == '\t') {
-                        status = ScanStatus.NEXT
-                        tokenBuf.add(numToken(numBuf))
-                        numBuf = 0f
-                    }
-                }
-
-                ScanStatus.POS_POINT -> {
-                    if (c.isDigit()) {
-                        status = ScanStatus.POS_POINT
-                        exp /= 10f
-                        numBuf += (c - '0').toFloat() * exp
-                    } else if (c.isLetter()) {
-                        status = ScanStatus.ID
-                        tokenBuf.add(numToken(numBuf))
-                        strBuf.append(c)
-                        numBuf = 0f
-                        exp = 1f
-                    } else if (c in scanSignList) {
-                        status = ScanStatus.SIGN
-                        tokenBuf.add(numToken(numBuf))
-                        strBuf.append(c)
-                        numBuf = 0f
-                        exp = 1f
-                    } else if (c == ' ' || c == '\t') {
-                        status = ScanStatus.NEXT
-                        tokenBuf.add(numToken(numBuf))
-                        numBuf = 0f
-                        exp = 1f
-                    } else status = ScanStatus.ERROR
-                }
-
-                ScanStatus.NEG_POINT -> {
-                    if (c.isDigit()) {
-                        status = ScanStatus.NEG_POINT
-                        exp /= 10f
-                        numBuf -= (c - '0').toFloat() * exp
-                    } else if (c.isLetter()) {
-                        status = ScanStatus.ID
-                        tokenBuf.add(numToken(numBuf))
-                        strBuf.append(c)
-                        numBuf = 0f
-                        exp = 1f
-                    } else if (c in scanSignList) {
-                        status = ScanStatus.SIGN
-                        tokenBuf.add(numToken(numBuf))
-                        strBuf.append(c)
-                        numBuf = 0f
-                        exp = 1f
-                    } else if (c == ' ' || c == '\t') {
-                        status = ScanStatus.NEXT
-                        tokenBuf.add(numToken(numBuf))
-                        numBuf = 0f
-                        exp = 1f
-                    } else status = ScanStatus.ERROR
-                }
-            }
+            else
+                return ScanResult(arrayOf(), -1145, scanErrorChar)
             if (status == ScanStatus.ERROR) {
                 scanErrorChar = c
                 scanErrorIndex = i
@@ -343,18 +378,6 @@ class Calculator {
      * @return 转换后的后缀表达式
      */
     fun analyze(scanResult: ScanResult): AnalyzeResult {
-        fun opFunc(a: Float, b: Float, o: String): Float {
-            // 词法分析后不可能出现除 + - * / % ( ) 外的其他字符
-            // 调用时在括号判断后只会出现 + - * / %
-            return when (o) {
-                "+" -> a + b
-                "-" -> a - b
-                "*" -> a * b
-                "/" -> a / b
-                "%" -> a % b
-                else -> a
-            }
-        }
 
         // 后缀表达式存储
         val rpn = arrayListOf<Token>()
@@ -372,22 +395,14 @@ class Calculator {
                         // 操作符栈空
                         rpnStack.push(token)
                     } else {
-//                        val tsrpn = rpnStack.peek().op
-//                        if (tsrpn == "+" || tsrpn == "-" || tsrpn == "(") {// 操作符比栈顶优先级大
-//                            rpnStack.push(token)
-//
-//                        } else {
-//                            rpn.add(token)
-//                        }
-//                    }
                         val topOp = rpnStack.peek().op
                         if (topOp == "+" || topOp == "-" || topOp == "(") {// 操作符比栈顶优先级大
                             rpnStack.push(token)
                         } else {
                             while (true) {
                                 if (rpnStack.isEmpty()) break
-                                val topOp = rpnStack.peek().op
-                                if (topOp == "+" || topOp == "-" || topOp == "(") break
+                                val topOp2 = rpnStack.peek().op
+                                if (topOp2 == "+" || topOp2 == "-" || topOp2 == "(") break
                                 else rpn.add(rpnStack.pop())
                             }
                             rpnStack.push(token)
@@ -398,10 +413,6 @@ class Calculator {
                     if (rpnStack.size == 0) {
                         // 操作符栈空
                         rpnStack.push(token)
-//                    } else if (rpnStack.peek().op == "(") {
-//                        rpnStack.push(token)
-//                    } else {
-//                        rpn.add(token)
                     } else {
                         while (true) {
                             if (rpnStack.isEmpty()) break
@@ -414,11 +425,17 @@ class Calculator {
                     // 左括号，直接入栈
                     rpnStack.push(token)
                 } else if (token.op == ")") {
+                    // 括号内空的表达式
+                    if (rpnStack.isNotEmpty()) if (rpnStack.peek().op == "(") return AnalyzeResult(
+                        arrayOf(),
+                        unkToken(token.op),
+                        AnalyzeFlag.EMPTY_SUB_EXPR
+                    )
                     while (true) {
                         // 右括号，出栈直到遇到左括号
                         // 如果栈空了表示表达式不正确
                         if (rpnStack.isEmpty()) {
-                            return AnalyzeResult(arrayOf(), unkToken(token.op))
+                            return AnalyzeResult(arrayOf(), unkToken(token.op), AnalyzeFlag.UNMATCHED_PARENTHESES)
                         }
                         val sign = rpnStack.pop()
                         if (sign.op == "(") break
@@ -426,16 +443,22 @@ class Calculator {
                     }
                 }
             } else if (token.type == TokenType.FUNC) {
-                // 运算时得处理
-//                rpn.add(token)
-                rpnStack.push(token)
+                if (supportFunc.contains(token.op))
+                    rpnStack.push(token)
+                else
+                    return AnalyzeResult(arrayOf(), unkToken(token.op), AnalyzeFlag.UNK_FUNC)
             }
         }
 
         // 判断操作符栈是否不为空
         while (true) {
             if (rpnStack.isEmpty()) break
-            if (rpnStack.peek().op == ")") return AnalyzeResult(arrayOf(), unkToken(")"))
+            // 超出预期的右括号 (通常不会发生)
+            if (rpnStack.peek().op == ")") return AnalyzeResult(
+                arrayOf(),
+                unkToken(")"),
+                AnalyzeFlag.UNMATCHED_PARENTHESES
+            )
             rpn.add(rpnStack.pop())
         }
 
@@ -445,23 +468,38 @@ class Calculator {
     fun calc(rpnExpr: Array<Token>): Float {
         val stack = Stack<Float>()
         for (token in rpnExpr) {
-            if (token.type == TokenType.NUM) stack.push(token.num)
-            else if (token.type == TokenType.OP) {
-                val b = stack.pop()
-                val a = stack.pop()
-                when (token.op) {
-                    "+" -> stack.push(a + b)
-                    "-" -> stack.push(a - b)
-                    "*" -> stack.push(a * b)
-                    "/" -> stack.push(a / b)
-                    "^" -> stack.push(Math.pow(a.toDouble(), b.toDouble()).toFloat())
-                    else -> {}
+            when (token.type) {
+                TokenType.NUM -> stack.push(token.num)
+                TokenType.OP -> {
+                    val b = stack.pop()
+                    val a = stack.pop()
+                    when (token.op) {
+                        "+" -> stack.push(a + b)
+                        "-" -> stack.push(a - b)
+                        "*" -> stack.push(a * b)
+                        "/" -> stack.push(a / b)
+                        "^" -> stack.push(a.pow(b))
+                        else -> {
+                            // TODO: 异常处理，但是没必要
+                        }
+                    }
                 }
-            } else if (token.type == TokenType.FUNC) {
-                val a = stack.pop()
-                when (token.op.lowercase()) {
-                    "sqrt" -> stack.push(Math.sqrt(a.toDouble()).toFloat())
-                    else -> {} // TODO: 异常处理
+                TokenType.FUNC -> {
+                    val a = stack.pop()
+                    when (token.op.lowercase()) {
+                        "sqrt" -> stack.push(sqrt(a))
+                        "ln" -> stack.push(ln(a))
+                        "sin" -> stack.push(sin(a))
+                        "cos" -> stack.push(cos(a))
+                        "tan" -> stack.push(tan(a))
+                        "asin" -> stack.push(asin(a))
+                        "acos" -> stack.push(acos(a))
+                        "atan" -> stack.push(atan(a))
+                        else -> {} // TODO: 异常处理
+                    }
+                }
+                else -> {
+                    // TODO: Nothing to do.
                 }
             }
         }

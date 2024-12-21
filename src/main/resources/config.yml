@@ -1,3 +1,5 @@
 # Configuration
 
+# Maximum token limit. Default value: 256.
+MaxTokenLimit: 256
 
