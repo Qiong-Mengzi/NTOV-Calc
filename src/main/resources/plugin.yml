@@ -6,8 +6,12 @@ load: STARTUP
 authors: [ Qiong-Mengzi ]
 description: 'Command Line Calculator'
 
+default-permission: false
 commands:
   calc:
     description: 'Compute expression.'
-    permission: no op
     usage: '/calc <expression>'
+    permission-message: 'You do not have the required permissions to perform this action.'
+permissions:
+  calc:
+    default: false
